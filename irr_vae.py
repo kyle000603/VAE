@@ -17,8 +17,8 @@ batch_size = 64
 x_dim = 784
 hidden_size = 10
 
-lr = 1e-3
-epoch_num = 100
+lr = 5e-3
+epoch_num = 50
 LOG = "test_result"
 ###################################
 
@@ -42,28 +42,26 @@ class VariationalAutoEncoder(nn.Module):
         self.VQ = VQ
 
         # Encoder
-        self.encoder_mu = nn.Sequential(
+        self.encodernet = nn.Sequential(
             nn.Linear(self.input_size, 256),
             nn.ReLU(),
-            nn.Linear(256, 128),
-            nn.ReLU(),
-            nn.Linear(128, self.hidden_size),
+            nn.Linear(256, 64),
             nn.ReLU()
         )
-        self.encoder_var = nn.Sequential(
-            nn.Linear(self.input_size, 256),
-            nn.ReLU(),
-            nn.Linear(256, 128),
-            nn.ReLU(),
-            nn.Linear(128, self.hidden_size),
+        self.mu_encoder = nn.Sequential(
+            nn.Linear(64, self.hidden_size),
+            nn.ReLU()
+        )
+        self.var_encoder = nn.Sequential(
+            nn.Linear(64, self.hidden_size),
             nn.ReLU()
         )
 
         # Decoder
         self.decoder = nn.Sequential(
-            nn.Linear(self.hidden_size, 128),
+            nn.Linear(self.hidden_size, 64),
             nn.ReLU(),
-            nn.Linear(128, 256),
+            nn.Linear(64, 256),
             nn.ReLU(),
             nn.Linear(256, self.input_size),
             nn.Sigmoid()
@@ -71,8 +69,9 @@ class VariationalAutoEncoder(nn.Module):
     
     def encoder(self, x:torch.Tensor):
         x = x.reshape(-1, 784)
-        mu = self.encoder_mu(x)
-        log_var = self.encoder_var(x)
+        x = self.encodernet(x)
+        mu = self.mu_encoder(x)
+        log_var = self.var_encoder(x)
         return mu, log_var
     
     def reparameterize(self, mu:torch.Tensor, logvar:torch.Tensor):
