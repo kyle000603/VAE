@@ -91,7 +91,7 @@ class VariationalAutoEncoder(nn.Module):
         out = self.decoder(latent)
         out = out.reshape(-1, 1, 28, 28)
 
-        return mu, log_var, out
+        return mu, log_var, out, latent
 
 class LossFunction(nn.Module):
     def __init__(self, *args, **kwargs) -> None:
@@ -118,7 +118,7 @@ def train_epoch(train_loader:DataLoader, epoch:int, optimizer:torch.optim.Adam, 
     for idx, [data, label] in enumerate(tloader):
         optimizer.zero_grad()
 
-        mu, logvar, out = VAE(data)
+        mu, logvar, out, _ = VAE(data)
         loss = loss_function(out, data, mu, logvar)
 
         loss.backward()
@@ -140,7 +140,7 @@ def test_epoch(test_loader:DataLoader, epoch:int, VAE:VariationalAutoEncoder, lo
     fin_idx = 0
     ret = None
     for idx, [data, labels] in enumerate(vloader):
-        mu, logvar, out = VAE(data)
+        mu, logvar, out, latent = VAE(data)
         loss_tmp = loss_function(out, data, mu, logvar)
 
         loss += loss_tmp.data
@@ -154,6 +154,7 @@ def test_epoch(test_loader:DataLoader, epoch:int, VAE:VariationalAutoEncoder, lo
     log.flush()
     
     if STATUS == "Testing":
+        plot_latent(latent=latent, )
         show_img(data, out, labels)
 
 def get_tensorboard(log_name):
@@ -188,6 +189,14 @@ def train(train_loader:DataLoader, test_loader:DataLoader, VAE:VariationalAutoEn
     
     return outputs
 
+def plot_latent(latent, data, num_batches=100):
+    for i, (x, y) in enumerate(data):
+        z = autoencoder.encoder(x.to(device))
+        z = latent.numpy()
+        plt.scatter(z[:, 0], z[:, 1], c=y, cmap='tab10')
+        if i > num_batches:
+            plt.colorbar()
+            break
 
 if __name__ == "__main__":
     train_dataloader, test_dataloader = prepare_data()
