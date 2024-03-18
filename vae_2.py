@@ -66,7 +66,7 @@ class VariationalAutoEncoder(nn.Module):
         log_var = self.var_encoder(x)
         return mu, log_var
     
-    def reparameterize(self, mu:torch.Tensor, logvar:torch.Tensor)->torch.Tensor:
+    def reparameterize(self, mu:torch.Tensor, logvar:torch.Tensor):
         # reparameterization trick
         std = torch.exp(0.5*logvar)
         #eps = torch.randn_like(std)
@@ -96,7 +96,7 @@ class LossFunction(nn.Module):
     def forward(self, recon_x:torch.Tensor, x:torch.Tensor, 
                 mu:torch.Tensor, logvar:torch.Tensor)->torch.Tensor:
         # Reconstruction term
-        BCE = F.binary_cross_entropy(self.clip(recon_x), self.clip(x), reduction="sum")
+        BCE = F.binary_cross_entropy(self.clip(recon_x), self.clip(x), reduction='sum')
         
         # KLD : 0.5 * sum( sigma^2 + mu^2 - ln(sigma^2) - 1 )
         KLD = -0.5 * torch.sum(1 + logvar - torch.square(mu) - torch.exp(logvar))
@@ -117,10 +117,9 @@ def train_epoch(train_loader:DataLoader, epoch:int, optimizer:torch.optim.Adam, 
         loss = loss_function(out, data, mu, logvar)
         loss /= batch_size
 
+        loss_epoch += loss.data
         loss.backward()
         optimizer.step()
-
-        loss_epoch += loss.data
         fin_idx = idx + 1
         tloader.set_postfix_str(f'loss: {loss_epoch/fin_idx:0.4f}')
     loss_epoch /= fin_idx
@@ -164,9 +163,9 @@ def show_img(data:torch.Tensor, outputs:torch.Tensor, labels:torch.Tensor, end:i
     for idx in range(end):
         label_l = labels[idx]
         plt.imshow(org_img[idx], cmap='gray')
-        plt.savefig(f'{label_l}_org.png')
+        plt.savefig(f'VAE_img/{label_l}_org.png')
         plt.imshow(out_img[idx], cmap='gray')
-        plt.savefig(f'{label_l}_con.png')
+        plt.savefig(f'VAE_img/{label_l}_con.png')
 
 def train(train_loader:DataLoader, test_loader:DataLoader, VAE:VariationalAutoEncoder, epochs:int, logdir:str):
     optimizer = torch.optim.Adam(VAE.parameters(), lr=lr)
