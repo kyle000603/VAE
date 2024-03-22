@@ -13,13 +13,14 @@ import torchsummary
 
 
 ###################################
-DEVICE = torch.device("cpu")
+os.environ["CUDA_VISIBLE_DEVICES"]="0"
+DEVICE = torch.device("cuda")
 batch_size = 128
 in_channel = 3
 hidden_dim = 256
 hidden_size = 10
-lr = 2e-4
-epoch_num = 5
+lr = 2e-5
+epoch_num = 200
 BETA = 0.25
 
 LOG = "cnn_vqvae"+"_"+str(epoch_num)
@@ -27,13 +28,13 @@ LOG = "cnn_vqvae"+"_"+str(epoch_num)
 
 #Downloading mnist data
 def prepare_data():
-    transform = transforms.Compose(transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[1.0, 1.0, 1.0]),
-                                   transforms.ToTensor())
-    train_data = datasets.CIFAR10(root='./', train=True, download=True, transform=transform)
-    test_data = datasets.CIFAR10(root='./', train=False, download=True, transform=transform)
+    transform_c = transforms.Compose([transforms.ToTensor(),
+                                      transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[1.0, 1.0, 1.0])])
+    train_data = datasets.CIFAR10(root='./', train=True, download=True, transform=transform_c)
+    test_data = datasets.CIFAR10(root='./', train=False, download=True, transform=transforms.ToTensor())
     
-    train_loader = DataLoader(dataset=train_data, batch_size=batch_size, shuffle=True, num_workers=12)
-    test_loader = DataLoader(dataset=test_data, batch_size=8, shuffle=False, num_workers=12)
+    train_loader = DataLoader(dataset=train_data, batch_size=batch_size, shuffle=True, num_workers=12, prefetch_factor=2**5)
+    test_loader = DataLoader(dataset=test_data, batch_size=16, shuffle=False, num_workers=12, prefetch_factor=2**5)
 
     return train_loader, test_loader
     
@@ -101,34 +102,51 @@ class Embedding(nn.Module):
         # Loss (Embedding Loss + BETA * Commitment Loss)
         loss = self.loss_func(vq_z.detach(), z) + self.beta * self.loss_func(vq_z, z.detach())
         vq_z = z + (vq_z - z).detach()
+        vq_z = vq_z.permute(0, 3, 1, 2)
         return loss, vq_z
 
 class VQVariationalAutoEncoder(nn.Module):
-    def __init__(self, k_dim=10, e_dim=8*8, h_dim=256) -> None:
+    def __init__(self, k_dim=256, e_dim=8*8, h_dim=256) -> None:
         super(VQVariationalAutoEncoder, self).__init__()
         self.k_dim = k_dim
         self.e_dim = e_dim
         self.h_dim = h_dim
 
         self.encoder = nn.Sequential(
+            #Printing(),
             nn.Conv2d(in_channels=3, out_channels=h_dim, kernel_size=4, stride=2, padding=1),       # 3x32x32 -> Hx16x16
+            #Printing(),
             nn.Conv2d(in_channels=h_dim, out_channels=h_dim, kernel_size=4, stride=2, padding=1),   # Hx16x16 -> Hx8x8
+            #Printing(),
             ResidualBlock(in_planes=h_dim, out_planes=h_dim),                                       # Hx8x8 -> Hx8x8
-            ResidualBlock(in_planes=h_dim, out_planes=k_dim)                                        # Hx8x8 -> Hx8x8
+            #Printing(),
+            ResidualBlock(in_planes=h_dim, out_planes=h_dim)                                       # Hx8x8 -> Hx8x8
+            #Printing(),
+            #,nn.Conv2d(in_channels=h_dim, out_channels=k_dim, kernel_size=1, stride=1)
+            #Printing()
         )
         self.embedding = Embedding(k_dim=k_dim, e_dim=e_dim, beta=BETA)
 
         self.decoder = nn.Sequential(
-            ResidualBlock(in_planes=k_dim, out_planes=h_dim),
+            #Printing(),
+            #nn.ConvTranspose2d(in_channels=k_dim, out_channels=h_dim, kernel_size=1, stride=1),
+            #Printing(),
             ResidualBlock(in_planes=h_dim, out_planes=h_dim),
+            #Printing(),
+            ResidualBlock(in_planes=h_dim, out_planes=h_dim),
+            #Printing(),
             nn.ConvTranspose2d(in_channels=h_dim, out_channels=h_dim, kernel_size=4, stride=2, padding=1),
+            #Printing(),
             nn.ConvTranspose2d(in_channels=h_dim, out_channels=3, kernel_size=4, stride=2, padding=1),
+            #Printing(),
             nn.Tanh()
         )
         self.weight_init()
     
     def weight_init(self):
         for module in self._modules:
+            if module == 'embedding':
+                continue
             for m in self._modules[module]:
                 if isinstance(m,nn.Conv2d):
                     nn.init.kaiming_normal(m.weight)
@@ -174,7 +192,7 @@ def train_epoch(train_loader:DataLoader, epoch:int, optimizer:torch.optim.Adam, 
         recon_x, embedding_loss = model(data)
         recon_loss = loss_function(recon_x, data)
         loss = recon_loss + embedding_loss
-        loss /= batch_size
+        #loss /= batch_size
 
         loss.backward()
         optimizer.step()
@@ -188,15 +206,15 @@ def train_epoch(train_loader:DataLoader, epoch:int, optimizer:torch.optim.Adam, 
     recon_loss_epoch /= fin_idx
     embedding_loss_epoch /= fin_idx
     log.add_scalar('loss/Train', loss_epoch, epoch)
-    log.add_scalar('recon_loss/Train', recon_loss_epoch)
-    log.add_scalar('embedding_loss/Train', embedding_loss_epoch)
+    log.add_scalar('recon_loss/Train', recon_loss_epoch, epoch)
+    log.add_scalar('embedding_loss/Train', embedding_loss_epoch, epoch)
     log.flush()
 
 def test_epoch(test_loader:DataLoader, epoch:int, model:VQVariationalAutoEncoder, loss_function:LossFunction, log:SummaryWriter, STATUS="Testing"):
     model.eval()
     vloader = tqdm(test_loader)
     vloader.set_description(f'{STATUS}... Epoch: {epoch:03d}')
-    vloader.set_postfix_str(f'loss: {0.0000:0.4f}')
+    vloader.set_postfix_str(f'loss: {.0:0.4f}, recon_loss: {.0:0.4f}, emb_loss: {.0:0.4f}')
     loss = .0
     fin_idx = 0
     recon_loss_epoch = .0
@@ -206,23 +224,23 @@ def test_epoch(test_loader:DataLoader, epoch:int, model:VQVariationalAutoEncoder
         recon_x, embedding_loss = model(data)
         recon_loss = loss_function(recon_x, data)
         loss_tmp = recon_loss + embedding_loss
-        loss_tmp /= batch_size
+        #loss_tmp /= batch_size
         loss += loss_tmp.data
         recon_loss_epoch += recon_loss.data
         embedding_loss_epoch += embedding_loss.data
         fin_idx = idx + 1
-        vloader.set_postfix_str(f'loss: {loss/fin_idx:0.4f}')
+        vloader.set_postfix_str(f'loss: {loss/fin_idx:0.4f}, recon_loss: {recon_loss_epoch/fin_idx:0.4f}, emb_loss: {embedding_loss_epoch/fin_idx:0.4f}')
     loss /= fin_idx
     recon_loss_epoch /= fin_idx
     embedding_loss_epoch /= fin_idx
     if STATUS == "Testing":
         log.add_scalar('loss/Test', loss, epoch)
-        log.add_scalar('recon_loss/Test', recon_loss_epoch)
-        log.add_scalar('embedding_loss/Test', embedding_loss_epoch)
+        log.add_scalar('recon_loss/Test', recon_loss_epoch, epoch)
+        log.add_scalar('embedding_loss/Test', embedding_loss_epoch, epoch)
     else:
         log.add_scalar('loss/Validation', loss, epoch)
-        log.add_scalar('recon_loss/Validation', recon_loss_epoch)
-        log.add_scalar('embedding_loss/Validation', embedding_loss_epoch)
+        log.add_scalar('recon_loss/Validation', recon_loss_epoch, epoch)
+        log.add_scalar('embedding_loss/Validation', embedding_loss_epoch, epoch)
     log.flush()
     
     if STATUS == "Testing":
@@ -233,16 +251,16 @@ def get_tensorboard(log_name):
     return SummaryWriter(log_dir=logdir)
 
 def show_img(data:torch.Tensor, outputs:torch.Tensor, labels:torch.Tensor):
-    out_img = torch.squeeze(outputs.data).numpy()
-    org_img = torch.squeeze(data.data).numpy()
-    labels = torch.squeeze(labels.data).numpy()
+    out_img = outputs.permute(0,2,3,1).cpu().data.numpy()
+    org_img = data.permute(0,2,3,1).cpu().data.numpy()
+    labels = labels.data.numpy()
 
     for idx in range(org_img.shape[0]):
         label_l = labels[idx]
         plt.imshow(org_img[idx], cmap='gray')
-        plt.savefig(f'CNN_VAE_img/{label_l}_org.png')
+        plt.savefig(f'CNN_VQVAE_img/{idx}_org{label_l}.png')
         plt.imshow(out_img[idx], cmap='gray')
-        plt.savefig(f'CNN_VAE_img/{label_l}_con.png')
+        plt.savefig(f'CNN_VQVAE_img/{idx}_con{label_l}.png')
 
 def train(train_loader:DataLoader, test_loader:DataLoader, model:VQVariationalAutoEncoder, epochs:int, logdir:str):
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
@@ -264,6 +282,6 @@ def train(train_loader:DataLoader, test_loader:DataLoader, model:VQVariationalAu
 if __name__ == "__main__":
     torch.manual_seed(2024)
     train_dataloader, test_dataloader = prepare_data()
-    model = VQVariationalAutoEncoder(batch_size=batch_size, hidden_dim=hidden_dim, hidden_size=hidden_size).to(DEVICE)
-    torchsummary.summary(model, (3, 32, 32))
+    model = VQVariationalAutoEncoder().to(DEVICE)
+    #torchsummary.summary(model, (3, 32, 32))
     train(train_loader=train_dataloader, test_loader=test_dataloader, model=model, epochs=epoch_num, logdir=LOG)
